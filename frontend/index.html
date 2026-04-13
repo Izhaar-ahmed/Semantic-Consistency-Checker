@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Semantic Consistency Checker</title>
+  <meta name="description" content="Detect semantic contradictions in text using a two-stage NLP pipeline powered by SBERT and DeBERTa." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Reset & Base ──────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-card: rgba(16, 16, 28, 0.85);
+      --bg-card-hover: rgba(22, 22, 40, 0.95);
+      --border: rgba(99, 102, 241, 0.15);
+      --border-active: rgba(99, 102, 241, 0.4);
+      --accent: #818cf8;
+      --accent-glow: rgba(129, 140, 248, 0.3);
+      --green: #34d399;
+      --green-glow: rgba(52, 211, 153, 0.2);
+      --red: #f87171;
+      --red-glow: rgba(248, 113, 113, 0.2);
+      --yellow: #fbbf24;
+      --text-primary: #e2e8f0;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --font: 'Inter', -apple-system, system-ui, sans-serif;
+      --radius: 16px;
+      --radius-sm: 10px;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ─── Animated Background ──────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: 
+        radial-gradient(ellipse 80% 60% at 50% -20%, rgba(99, 102, 241, 0.12), transparent),
+        radial-gradient(ellipse 60% 40% at 80% 80%, rgba(139, 92, 246, 0.08), transparent),
+        radial-gradient(ellipse 50% 50% at 10% 60%, rgba(6, 182, 212, 0.06), transparent);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ─── Floating Orbs ────────────────────────────── */
+    .orb {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.4;
+      pointer-events: none;
+      z-index: 0;
+      animation: orbFloat 20s ease-in-out infinite;
+    }
+    .orb-1 { width: 400px; height: 400px; background: rgba(99, 102, 241, 0.15); top: -100px; left: -100px; }
+    .orb-2 { width: 300px; height: 300px; background: rgba(139, 92, 246, 0.1); bottom: -50px; right: -50px; animation-delay: -7s; }
+    .orb-3 { width: 200px; height: 200px; background: rgba(6, 182, 212, 0.08); top: 50%; left: 60%; animation-delay: -14s; }
+    @keyframes orbFloat {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      33% { transform: translate(30px, -30px) scale(1.05); }
+      66% { transform: translate(-20px, 20px) scale(0.95); }
+    }
+
+    /* ─── Layout ───────────────────────────────────── */
+    .container { max-width: 900px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+    /* ─── Header ───────────────────────────────────── */
+    header {
+      text-align: center;
+      padding: 60px 0 40px;
+    }
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .logo-icon {
+      width: 48px; height: 48px;
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 8px 32px var(--accent-glow);
+      font-size: 22px;
+    }
+    h1 {
+      font-size: 2.2rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #e2e8f0 0%, #818cf8 50%, #a78bfa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      font-size: 1rem;
+      color: var(--text-secondary);
+      max-width: 520px;
+      margin: 8px auto 0;
+      font-weight: 400;
+    }
+
+    /* ─── Mode Tabs ────────────────────────────────── */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      background: rgba(15, 15, 30, 0.6);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 4px;
+      margin-bottom: 32px;
+      backdrop-filter: blur(10px);
+    }
+    .tab {
+      flex: 1;
+      padding: 12px 20px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-family: var(--font);
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: var(--radius-sm);
+      transition: all 0.25s ease;
+    }
+    .tab:hover { color: var(--text-primary); background: rgba(99, 102, 241, 0.06); }
+    .tab.active {
+      background: rgba(99, 102, 241, 0.12);
+      color: var(--accent);
+      box-shadow: 0 0 20px rgba(99, 102, 241, 0.08);
+    }
+
+    /* ─── Cards ─────────────────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      backdrop-filter: blur(20px);
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+    .card:hover { border-color: var(--border-active); box-shadow: 0 8px 40px rgba(99, 102, 241, 0.06); }
+
+    /* ─── Forms ─────────────────────────────────────── */
+    .form-group { margin-bottom: 20px; }
+    label {
+      display: block;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    textarea, input[type="text"] {
+      width: 100%;
+      background: rgba(10, 10, 20, 0.6);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+      font-family: var(--font);
+      font-size: 0.95rem;
+      color: var(--text-primary);
+      resize: vertical;
+      transition: border-color 0.25s ease, box-shadow 0.25s ease;
+      outline: none;
+    }
+    textarea:focus, input[type="text"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    textarea::placeholder, input::placeholder { color: var(--text-muted); }
+
+    /* ─── Button ────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 32px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-family: var(--font);
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
+      width: 100%;
+      justify-content: center;
+    }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 8px 30px rgba(99, 102, 241, 0.4); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── Results ───────────────────────────────────── */
+    .results { margin-top: 28px; animation: fadeSlideUp 0.5s ease; }
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .result-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .verdict-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 18px;
+      border-radius: 100px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .verdict-consistent {
+      background: var(--green-glow);
+      color: var(--green);
+      border: 1px solid rgba(52, 211, 153, 0.25);
+    }
+    .verdict-contradiction {
+      background: var(--red-glow);
+      color: var(--red);
+      border: 1px solid rgba(248, 113, 113, 0.25);
+      animation: pulseRed 2s ease-in-out infinite;
+    }
+    @keyframes pulseRed {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.2); }
+      50% { box-shadow: 0 0 20px 4px rgba(248, 113, 113, 0.15); }
+    }
+    .time-badge {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    /* ─── Metrics Grid ─────────────────────────────── */
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .metric {
+      background: rgba(10, 10, 25, 0.5);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 16px;
+      text-align: center;
+    }
+    .metric-value {
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+    }
+    .metric-label {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-top: 4px;
+    }
+
+    /* ─── Probability Bars ─────────────────────────── */
+    .prob-bars { margin-top: 8px; }
+    .prob-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .prob-label {
+      width: 100px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-align: right;
+    }
+    .prob-track {
+      flex: 1;
+      height: 10px;
+      background: rgba(10, 10, 25, 0.6);
+      border-radius: 100px;
+      overflow: hidden;
+    }
+    .prob-fill {
+      height: 100%;
+      border-radius: 100px;
+      transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .prob-fill.entailment { background: linear-gradient(90deg, #34d399, #6ee7b7); }
+    .prob-fill.neutral { background: linear-gradient(90deg, #fbbf24, #fcd34d); }
+    .prob-fill.contradiction { background: linear-gradient(90deg, #f87171, #fca5a5); }
+    .prob-value {
+      width: 55px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ─── Contradiction Cards ──────────────────────── */
+    .contradiction-item {
+      background: rgba(248, 113, 113, 0.04);
+      border: 1px solid rgba(248, 113, 113, 0.12);
+      border-radius: var(--radius-sm);
+      padding: 18px;
+      margin-bottom: 12px;
+      transition: border-color 0.2s;
+    }
+    .contradiction-item:hover { border-color: rgba(248, 113, 113, 0.3); }
+    .contradiction-item .sent {
+      font-size: 0.88rem;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+      line-height: 1.5;
+    }
+    .contradiction-item .sent b { color: var(--red); font-weight: 600; }
+    .contradiction-item .conf {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-top: 8px;
+    }
+    .no-contradictions {
+      text-align: center;
+      padding: 32px;
+      color: var(--green);
+      font-weight: 600;
+      font-size: 1rem;
+    }
+
+    /* ─── Section Headers ──────────────────────────── */
+    .section-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 12px;
+    }
+
+    /* ─── Pipeline Stage Indicator ─────────────────── */
+    .stages {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .stage {
+      flex: 1;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      background: rgba(10, 10, 25, 0.5);
+      border: 1px solid var(--border);
+      text-align: center;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      transition: all 0.3s;
+    }
+    .stage.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(99, 102, 241, 0.08);
+      box-shadow: 0 0 16px rgba(99, 102, 241, 0.1);
+    }
+    .stage.passed {
+      border-color: var(--green);
+      color: var(--green);
+      background: rgba(52, 211, 153, 0.06);
+    }
+    .stage.skipped {
+      border-color: var(--text-muted);
+      color: var(--text-muted);
+      opacity: 0.5;
+    }
+    .stage-arrow { color: var(--text-muted); font-size: 0.9rem; display: flex; align-items: center; }
+
+    /* ─── Hidden Panels ────────────────────────────── */
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* ─── Footer ───────────────────────────────────── */
+    footer {
+      text-align: center;
+      padding: 40px 0;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+
+  <div class="container">
+
+    <!-- Header -->
+    <header>
+      <div class="logo">
+        <div class="logo-icon">🔍</div>
+        <h1>Semantic Consistency Checker</h1>
+      </div>
+      <p class="subtitle">Detect contradictions in text using a two-stage pipeline — SBERT filtering + DeBERTa NLI verification.</p>
+    </header>
+
+    <!-- Mode Tabs -->
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="pair" onclick="switchTab('pair')">⚡ Sentence Pair</button>
+      <button class="tab" data-tab="document" onclick="switchTab('document')">📄 Full Document</button>
+    </div>
+
+    <!-- Panel 1: Sentence Pair -->
+    <div class="panel active" id="panel-pair">
+      <div class="card">
+        <div class="form-group">
+          <label>Sentence 1</label>
+          <input type="text" id="s1" placeholder="e.g. The weather was extremely cold." />
+        </div>
+        <div class="form-group">
+          <label>Sentence 2</label>
+          <input type="text" id="s2" placeholder="e.g. It was a warm sunny afternoon." />
+        </div>
+        <button class="btn" id="btn-pair" onclick="analyzePair()">
+          <span id="btn-pair-text">Analyze Pair</span>
+        </button>
+      </div>
+      <div id="pair-results"></div>
+    </div>
+
+    <!-- Panel 2: Full Document -->
+    <div class="panel" id="panel-document">
+      <div class="card">
+        <div class="form-group">
+          <label>Paste your document (multi-sentence text)</label>
+          <textarea id="doc-input" rows="8" placeholder="Paste a paragraph here. The pipeline will automatically split it into sentences, compare all pairs, and flag contradictions."></textarea>
+        </div>
+        <button class="btn" id="btn-doc" onclick="analyzeDocument()">
+          <span id="btn-doc-text">Scan Document</span>
+        </button>
+      </div>
+      <div id="doc-results"></div>
+    </div>
+
+    <footer>
+      Built with <a href="https://huggingface.co/cross-encoder/nli-deberta-v3-base" target="_blank">DeBERTa-v3</a>
+      &amp; <a href="https://www.sbert.net/" target="_blank">Sentence-Transformers</a>
+    </footer>
+
+  </div>
+
+  <script>
+    /* ─── Tab Switching ────────────────────────────── */
+    function switchTab(tab) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
+      document.getElementById(`panel-${tab}`).classList.add('active');
+    }
+
+    /* ─── Pair Analysis ────────────────────────────── */
+    async function analyzePair() {
+      const s1 = document.getElementById('s1').value.trim();
+      const s2 = document.getElementById('s2').value.trim();
+      if (!s1 || !s2) return;
+
+      const btn = document.getElementById('btn-pair');
+      const text = document.getElementById('btn-pair-text');
+      btn.disabled = true;
+      text.innerHTML = '<div class="spinner"></div> Analyzing...';
+
+      try {
+        const res = await fetch('/api/check-pair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sentence1: s1, sentence2: s2 }),
+        });
+        const data = await res.json();
+        renderPairResult(data);
+      } catch (e) {
+        document.getElementById('pair-results').innerHTML =
+          `<div class="card results" style="margin-top:24px;color:var(--red);">Error: ${e.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        text.textContent = 'Analyze Pair';
+      }
+    }
+
+    function renderPairResult(d) {
+      const isContra = d.verdict === 'CONTRADICTION';
+      const badgeClass = isContra ? 'verdict-contradiction' : 'verdict-consistent';
+      const icon = isContra ? '⚠️' : '✅';
+
+      let stagesHTML = `
+        <div class="stages">
+          <div class="stage passed">① SBERT Filter</div>
+          <div class="stage-arrow">→</div>
+          <div class="stage ${d.passed_filter ? 'passed' : 'skipped'}">② DeBERTa NLI</div>
+          <div class="stage-arrow">→</div>
+          <div class="stage active">${icon} Verdict</div>
+        </div>`;
+
+      let probBars = '';
+      if (d.passed_filter) {
+        probBars = `
+        <div class="section-label" style="margin-top:20px">NLI Probability Distribution</div>
+        <div class="prob-bars">
+          <div class="prob-row">
+            <div class="prob-label">Entailment</div>
+            <div class="prob-track"><div class="prob-fill entailment" style="width:${d.entailment * 100}%"></div></div>
+            <div class="prob-value">${(d.entailment * 100).toFixed(1)}%</div>
+          </div>
+          <div class="prob-row">
+            <div class="prob-label">Neutral</div>
+            <div class="prob-track"><div class="prob-fill neutral" style="width:${d.neutral * 100}%"></div></div>
+            <div class="prob-value">${(d.neutral * 100).toFixed(1)}%</div>
+          </div>
+          <div class="prob-row">
+            <div class="prob-label">Contradiction</div>
+            <div class="prob-track"><div class="prob-fill contradiction" style="width:${d.contradiction * 100}%"></div></div>
+            <div class="prob-value">${(d.contradiction * 100).toFixed(1)}%</div>
+          </div>
+        </div>`;
+      }
+
+      let filteredNote = '';
+      if (!d.passed_filter) {
+        filteredNote = `<div style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.15);border-radius:var(--radius-sm);padding:14px 18px;margin-top:16px;font-size:0.85rem;color:var(--yellow);">
+          ⚡ ${d.filtered_reason}<br/><span style="color:var(--text-muted);font-size:0.8rem">To see full pipeline (SBERT + DeBERTa), use sentences about the same topic.</span>
+        </div>`;
+      }
+
+      document.getElementById('pair-results').innerHTML = `
+        <div class="card results">
+          <div class="result-header">
+            <span class="verdict-badge ${badgeClass}">${icon} ${d.verdict}</span>
+            <span class="time-badge">⏱ ${d.time_ms}ms</span>
+          </div>
+          ${stagesHTML}
+          <div class="metrics">
+            <div class="metric">
+              <div class="metric-value">${d.similarity}</div>
+              <div class="metric-label">Cosine Sim</div>
+            </div>
+            <div class="metric">
+              <div class="metric-value">${d.passed_filter ? '✓' : '✗'}</div>
+              <div class="metric-label">Filter (≥${d.threshold})</div>
+            </div>
+            <div class="metric">
+              <div class="metric-value">${d.confidence !== null ? d.confidence : '—'}</div>
+              <div class="metric-label">Confidence</div>
+            </div>
+          </div>
+          ${probBars}
+          ${filteredNote}
+        </div>`;
+    }
+
+    /* ─── Document Analysis ─────────────────────────── */
+    async function analyzeDocument() {
+      const text = document.getElementById('doc-input').value.trim();
+      if (!text) return;
+
+      const btn = document.getElementById('btn-doc');
+      const btext = document.getElementById('btn-doc-text');
+      btn.disabled = true;
+      btext.innerHTML = '<div class="spinner"></div> Scanning...';
+
+      try {
+        const res = await fetch('/api/check-document', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        const data = await res.json();
+        renderDocResult(data);
+      } catch (e) {
+        document.getElementById('doc-results').innerHTML =
+          `<div class="card results" style="margin-top:24px;color:var(--red);">Error: ${e.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        btext.textContent = 'Scan Document';
+      }
+    }
+
+    function renderDocResult(d) {
+      let contras = '';
+      if (d.contradictions.length === 0) {
+        contras = `<div class="no-contradictions">✅ Document is fully consistent. No contradictions detected.</div>`;
+      } else {
+        contras = d.contradictions.map((c, i) => `
+          <div class="contradiction-item">
+            <div class="sent"><b>S1:</b> ${c.sentence1}</div>
+            <div class="sent"><b>S2:</b> ${c.sentence2}</div>
+            <div class="conf">Confidence: ${(c.confidence * 100).toFixed(1)}%</div>
+          </div>`).join('');
+      }
+
+      document.getElementById('doc-results').innerHTML = `
+        <div class="card results">
+          <div class="result-header">
+            <span class="verdict-badge ${d.contradictions.length > 0 ? 'verdict-contradiction' : 'verdict-consistent'}">
+              ${d.contradictions.length > 0 ? `⚠️ ${d.contradictions.length} Contradiction${d.contradictions.length > 1 ? 's' : ''}` : '✅ Fully Consistent'}
+            </span>
+            <span class="time-badge">⏱ ${d.time_ms}ms</span>
+          </div>
+          <div class="metrics">
+            <div class="metric">
+              <div class="metric-value">${d.total_sentences}</div>
+              <div class="metric-label">Sentences</div>
+            </div>
+            <div class="metric">
+              <div class="metric-value">${d.total_pairs}</div>
+              <div class="metric-label">Total Pairs</div>
+            </div>
+            <div class="metric">
+              <div class="metric-value">${d.filtered_pairs}</div>
+              <div class="metric-label">Filtered Pairs</div>
+            </div>
+            <div class="metric">
+              <div class="metric-value">${d.filter_reduction_pct}%</div>
+              <div class="metric-label">Reduction</div>
+            </div>
+            <div class="metric">
+              <div class="metric-value">${(d.consistency_score * 100).toFixed(0)}%</div>
+              <div class="metric-label">Consistency</div>
+            </div>
+          </div>
+          ${d.contradictions.length > 0 ? '<div class="section-label">Detected Contradictions</div>' : ''}
+          ${contras}
+        </div>`;
+    }
+
+    /* ─── Enter key support ────────────────────────── */
+    document.getElementById('s2').addEventListener('keydown', e => { if (e.key === 'Enter') analyzePair(); });
+  </script>
+</body>
+</html>

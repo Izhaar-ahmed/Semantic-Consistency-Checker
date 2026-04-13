@@ -1,2 +1,27 @@
+# Model weights (too large for GitHub)
 models/
+
+# Python cache
 __pycache__/
+*.pyc
+*.pyo
+
+# Environment
+.env
+.venv/
+venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary/debug scripts
+debug*.py
+*_analysis.py
+*_setup.sh
+*_fix.sh
+results.json
